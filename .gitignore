@@ -1,0 +1,18 @@
+# Virtual Environments
+env/
+venv/
+.venv/
+.env
+
+# Python Cache & Compiled Files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Streamlit Local Configuration (if you ever add secrets later)
+.streamlit/secrets.toml
+
+# OS Generated Files (Mac/Windows junk)
+.DS_Store
+Thumbs.db
