@@ -49,16 +49,16 @@ OPERATION_COLOURS: dict[str, str] = {
 def _apply_house_style(fig) -> None:
     """Apply the shared layout settings to a Plotly figure in-place.
 
-    Force black fonts and white plot/paper backgrounds so the charts remain
-    legible even when Streamlit is running in dark mode (which would otherwise
-    invert the text to white on the white `plotly_white` canvas).
+    The figure backgrounds are set to fully transparent so the chart adopts
+    whatever surface colour Streamlit is rendering (dark or light), and the
+    default ``theme="streamlit"`` injection on ``st.plotly_chart`` is left in
+    place so font / axis colours track the active Streamlit theme.
     """
     fig.update_layout(
         template=PLOTLY_TEMPLATE,
         margin=LAYOUT_MARGIN,
-        font=dict(color="black"),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -66,24 +66,11 @@ def _apply_house_style(fig) -> None:
             xanchor="left",
             x=0.0,
             title_text="",
-            font=dict(color="black"),
         ),
         hoverlabel=dict(
-            bgcolor="white",
             bordercolor="#1B4332",
-            font=dict(color="black", size=12),
+            font_size=12,
         ),
-    )
-    # Axis tick / title / line colours.
-    fig.update_xaxes(
-        tickfont=dict(color="black"),
-        title_font=dict(color="black"),
-        linecolor="#444444",
-    )
-    fig.update_yaxes(
-        tickfont=dict(color="black"),
-        title_font=dict(color="black"),
-        linecolor="#444444",
     )
 
 
@@ -141,7 +128,7 @@ def render_time_series(df: pd.DataFrame) -> None:
     fig.update_traces(line=dict(width=2.5), marker=dict(size=8))
     _apply_house_style(fig)
     fig.update_layout(hovermode="x unified", xaxis=dict(showgrid=False))
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_distance_by_officer(df: pd.DataFrame) -> None:
@@ -207,7 +194,7 @@ def render_distance_by_officer(df: pd.DataFrame) -> None:
         yaxis=dict(title=None),
         xaxis=dict(title="Distance (KM)"),
     )
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_operation_donut(df: pd.DataFrame) -> None:
@@ -244,8 +231,7 @@ def render_operation_donut(df: pd.DataFrame) -> None:
     )
     _apply_house_style(fig)
     fig.update_layout(showlegend=False)
-    fig.update_traces(textfont=dict(color="black"))
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_operations_timeline(df: pd.DataFrame) -> None:
@@ -327,7 +313,7 @@ def render_operations_timeline(df: pd.DataFrame) -> None:
         yaxis=dict(title=None, autorange="reversed"),
         height=max(380, 28 * len(officer_order) + 120),
     )
-    st.plotly_chart(fig, theme=None, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
