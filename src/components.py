@@ -133,8 +133,9 @@ def render_time_series(df: pd.DataFrame) -> None:
 
 def render_distance_by_officer(df: pd.DataFrame) -> None:
     """
-    Stacked horizontal bar chart — total kilometres per officer, broken down
-    by Operation_Type so each segment is visible and colour-coded.
+    Cinematic stacked horizontal bar chart — total kilometres per officer,
+    broken down by Operation_Type.  Height scales with the number of officers
+    so the bars stay thick and labels stay readable.
     """
     st.subheader("Distance Covered by Officer (KM)")
 
@@ -150,13 +151,14 @@ def render_distance_by_officer(df: pd.DataFrame) -> None:
           .sum()
     )
 
-    # Sort officers by their total distance so the longest bars are at the top.
-    officer_order = (
-        by_officer_op.groupby("Officer_Name")["Distance"]
+    # Per-officer totals — used for sorting and for the trailing "X KM" tag.
+    totals = (
+        by_officer_op.groupby("Officer_Name", as_index=False)["Distance"]
                      .sum()
-                     .sort_values(ascending=True)
-                     .index.tolist()
+                     .sort_values("Distance", ascending=True)
     )
+    officer_order = totals["Officer_Name"].tolist()
+    n_officers = len(officer_order)
 
     fig = px.bar(
         by_officer_op,
@@ -181,6 +183,7 @@ def render_distance_by_officer(df: pd.DataFrame) -> None:
         },
     )
     fig.update_traces(
+        marker_line_width=0,                # clean, paint-block segments
         hovertemplate=(
             "<b>%{y}</b><br>"
             "Operation: %{customdata[0]}<br>"
@@ -188,11 +191,39 @@ def render_distance_by_officer(df: pd.DataFrame) -> None:
         ),
         customdata=by_officer_op[["Operation_Type"]].values,
     )
+
+    # Trailing "1,538 KM" tag at the end of each bar — feels like a leaderboard.
+    max_total = float(totals["Distance"].max() or 0)
+    for _, row in totals.iterrows():
+        fig.add_annotation(
+            x=row["Distance"],
+            y=row["Officer_Name"],
+            text=f"<b>{int(row['Distance']):,} KM</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(size=12),
+        )
+
     _apply_house_style(fig)
     fig.update_layout(
         barmode="stack",
-        yaxis=dict(title=None),
-        xaxis=dict(title="Distance (KM)"),
+        bargap=0.25,                        # thicker bars
+        height=max(620, 34 * n_officers + 160),
+        yaxis=dict(
+            title=None,
+            tickfont=dict(size=13),
+            automargin=True,
+        ),
+        xaxis=dict(
+            title="Distance (KM)",
+            tickfont=dict(size=12),
+            title_font=dict(size=14),
+            range=[0, max_total * 1.15] if max_total else None,  # room for tags
+            showgrid=True,
+            gridwidth=0.5,
+        ),
+        legend=dict(font=dict(size=12)),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -336,9 +367,13 @@ def render_charts(df: pd.DataFrame) -> None:
 
     st.markdown("&nbsp;")
 
-    # Row 3 — stacked distance bar (left) + operation donut (right).
-    left, right = st.columns((1.3, 1))
-    with left:
-        render_distance_by_officer(df)
-    with right:
+    # Row 3 — cinematic stacked-bar leaderboard, full width.
+    render_distance_by_officer(df)
+
+    st.markdown("&nbsp;")
+
+    # Row 4 — operation-mix donut, centred and width-constrained so it
+    # doesn't stretch into a flat oval on wide monitors.
+    spacer_l, mid, spacer_r = st.columns((1, 2, 1))
+    with mid:
         render_operation_donut(df)
