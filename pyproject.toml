@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banbatt-ops-dashboard"
+version = "1.0.0"
+description = "UNMISS BANBATT-9 real-time operational tracking dashboard (Officers' Patrol Summary)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "BANBATT-9 Operations Cell" },
+]
+keywords = ["streamlit", "plotly", "military", "operations", "dashboard"]
+
+dependencies = [
+    "streamlit>=1.32,<2.0",
+    "pandas>=2.2,<3.0",
+    "plotly>=5.19,<6.0",
+    # pandas reads remote CSVs via the standard library, but pyarrow gives
+    # a meaningful speedup for larger Google-Sheet exports.
+    "pyarrow>=15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

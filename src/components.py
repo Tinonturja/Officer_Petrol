@@ -1,55 +1,379 @@
+"""
+Presentation layer for the BANBATT-9 Operations Dashboard.
+
+All Plotly figures and Streamlit widgets live here so that `app.py` stays a
+thin orchestration layer.  Each function takes a *filtered* DataFrame and is
+responsible for one well-defined panel of the dashboard.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-def render_kpis(df):
-    total_ops = len(df)
-    
-    # Safely calculate total KM
-    total_km = df['Distance_KM'].sum() if 'Distance_KM' in df.columns else 0
-    
-    # Safely find the busiest location
-    if 'Location' in df.columns and not df.empty:
-        busiest_loc = df['Location'].mode()[0] 
-    else:
-        busiest_loc = "N/A"
-    
-    # Display the metrics across 3 columns
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Operations Count", f"{total_ops}")
-    col2.metric("Total Distance Covered", f"{total_km:,.0f} KM")
-    col3.metric("Busiest Location", busiest_loc)
+from src.data_loader import OPERATION_TYPES
 
-def render_charts(df):
-    if df.empty:
-        st.warning("No data available to display charts. Check your filters.")
+# ---------------------------------------------------------------------------
+# Visual identity
+# ---------------------------------------------------------------------------
+
+# Clean, corporate-friendly Plotly template used by every figure on the page.
+PLOTLY_TEMPLATE: str = "plotly_white"
+
+# Standard layout margins — uncluttered, high-end feel.
+LAYOUT_MARGIN: dict[str, int] = dict(l=20, r=20, t=40, b=20)
+
+# A muted, military-corporate palette: deep greens, khaki, steel-blue, amber.
+_CATEGORY_COLOURS = [
+    "#1B4332",  # forest
+    "#3E5641",  # olive
+    "#519872",  # mid green
+    "#A4B494",  # khaki
+    "#9C6644",  # earth
+    "#D9AE61",  # sand
+    "#4C78A8",  # steel
+    "#2A4D69",  # navy
+    "#7D8491",  # slate
+    "#B7B07F",  # stone
+]
+
+# Stable colour assignment so the same Operation_Type is always the same hue
+# across the stacked bar, the donut, and the timeline.
+OPERATION_COLOURS: dict[str, str] = {
+    op: _CATEGORY_COLOURS[i % len(_CATEGORY_COLOURS)]
+    for i, op in enumerate(OPERATION_TYPES)
+}
+
+
+def _apply_house_style(fig) -> None:
+    """Apply the shared layout settings to a Plotly figure in-place.
+
+    The figure backgrounds are set to fully transparent so the chart adopts
+    whatever surface colour Streamlit is rendering (dark or light), and the
+    default ``theme="streamlit"`` injection on ``st.plotly_chart`` is left in
+    place so font / axis colours track the active Streamlit theme.
+    """
+    fig.update_layout(
+        template=PLOTLY_TEMPLATE,
+        margin=LAYOUT_MARGIN,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0.0,
+            title_text="",
+        ),
+        hoverlabel=dict(
+            bordercolor="#1B4332",
+            font_size=12,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# KPI cards
+# ---------------------------------------------------------------------------
+
+def render_kpis(df: pd.DataFrame) -> None:
+    """Render the three top-level KPI cards."""
+    total_ops = len(df)
+    total_km = float(df["Distance"].sum()) if "Distance" in df.columns else 0.0
+
+    if "Location" in df.columns and not df.empty:
+        modes = df["Location"].mode()
+        most_frequent_location = modes.iloc[0] if not modes.empty else "N/A"
+    else:
+        most_frequent_location = "N/A"
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Operations", f"{total_ops:,}")
+    col2.metric("Total Distance (KM)", f"{total_km:,.0f}")
+    col3.metric("Most Frequent Location", most_frequent_location)
+
+
+# ---------------------------------------------------------------------------
+# Charts
+# ---------------------------------------------------------------------------
+
+def render_time_series(df: pd.DataFrame) -> None:
+    """Daily operational tempo — number of operations over time."""
+    st.subheader("Operational Tempo Over Time")
+
+    if df.empty or "Date" not in df.columns:
+        st.info("No dated operations to plot.")
         return
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Distance Covered by Officer")
-        if 'Officer_Name' in df.columns and 'Distance_KM' in df.columns:
-            dist_df = df.groupby('Officer_Name')['Distance_KM'].sum().reset_index()
-            # Sort for better visual hierarchy
-            dist_df = dist_df.sort_values(by='Distance_KM', ascending=True)
-            
-            fig1 = px.bar(
-                dist_df, x='Distance_KM', y='Officer_Name', orientation='h',
-                labels={'Distance_KM': 'Total KM', 'Officer_Name': 'Officer'},
-                color_discrete_sequence=['#4C78A8']
-            )
-            st.plotly_chart(fig1, use_container_width=True)
+    tempo = (
+        df.dropna(subset=["Date"])
+          .assign(Day=lambda d: d["Date"].dt.normalize())
+          .groupby("Day", as_index=False)
+          .size()
+          .rename(columns={"size": "Operations"})
+          .sort_values("Day")
+    )
 
-    with col2:
-        st.subheader("Operations Breakdown")
-        if 'Operation_Type' in df.columns:
-            op_df = df['Operation_Type'].value_counts().reset_index()
-            op_df.columns = ['Operation_Type', 'Count']
-            
-            fig2 = px.pie(
-                op_df, values='Count', names='Operation_Type', hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set2
-            )
-            # Hover data to show the specific UNMISS operations clearly
-            fig2.update_traces(textinfo='percent+label', hoverinfo='label+value')
-            st.plotly_chart(fig2, use_container_width=True)
+    fig = px.line(
+        tempo,
+        x="Day",
+        y="Operations",
+        markers=True,
+        labels={"Operations": "Operations / Day", "Day": "Date"},
+        color_discrete_sequence=["#1B4332"],
+        hover_data={"Day": "|%d %b %Y", "Operations": ":,d"},
+    )
+    fig.update_traces(line=dict(width=2.5), marker=dict(size=8))
+    _apply_house_style(fig)
+    fig.update_layout(hovermode="x unified", xaxis=dict(showgrid=False))
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_distance_by_officer(df: pd.DataFrame) -> None:
+    """
+    Cinematic stacked horizontal bar chart — total kilometres per officer,
+    broken down by Operation_Type.  Height scales with the number of officers
+    so the bars stay thick and labels stay readable.
+    """
+    st.subheader("Distance Covered by Officer (KM)")
+
+    required = {"Officer_Name", "Operation_Type", "Distance"}
+    if df.empty or not required.issubset(df.columns):
+        st.info("Officer / distance data unavailable.")
+        return
+
+    # Aggregate while *preserving* the operation-type breakdown so each
+    # officer's bar is composed of one segment per op-type they performed.
+    by_officer_op = (
+        df.groupby(["Officer_Name", "Operation_Type"], as_index=False)["Distance"]
+          .sum()
+    )
+
+    # Per-officer totals — used for sorting and for the trailing "X KM" tag.
+    totals = (
+        by_officer_op.groupby("Officer_Name", as_index=False)["Distance"]
+                     .sum()
+                     .sort_values("Distance", ascending=True)
+    )
+    officer_order = totals["Officer_Name"].tolist()
+    n_officers = len(officer_order)
+
+    fig = px.bar(
+        by_officer_op,
+        x="Distance",
+        y="Officer_Name",
+        color="Operation_Type",
+        orientation="h",
+        labels={
+            "Distance": "Distance (KM)",
+            "Officer_Name": "Officer",
+            "Operation_Type": "Operation",
+        },
+        color_discrete_map=OPERATION_COLOURS,
+        category_orders={
+            "Officer_Name": officer_order,
+            "Operation_Type": list(OPERATION_TYPES),
+        },
+        hover_data={
+            "Officer_Name": True,
+            "Operation_Type": True,
+            "Distance": ":,.0f",
+        },
+    )
+    fig.update_traces(
+        marker_line_width=0,                # clean, paint-block segments
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Operation: %{customdata[0]}<br>"
+            "Distance: %{x:,.0f} KM<extra></extra>"
+        ),
+        customdata=by_officer_op[["Operation_Type"]].values,
+    )
+
+    # Trailing "1,538 KM" tag at the end of each bar — feels like a leaderboard.
+    max_total = float(totals["Distance"].max() or 0)
+    for _, row in totals.iterrows():
+        fig.add_annotation(
+            x=row["Distance"],
+            y=row["Officer_Name"],
+            text=f"<b>{int(row['Distance']):,} KM</b>",
+            showarrow=False,
+            xanchor="left",
+            xshift=10,
+            font=dict(size=12),
+        )
+
+    _apply_house_style(fig)
+    fig.update_layout(
+        barmode="stack",
+        bargap=0.25,                        # thicker bars
+        height=max(620, 34 * n_officers + 160),
+        yaxis=dict(
+            title=None,
+            tickfont=dict(size=13),
+            automargin=True,
+        ),
+        xaxis=dict(
+            title="Distance (KM)",
+            tickfont=dict(size=12),
+            title_font=dict(size=14),
+            range=[0, max_total * 1.15] if max_total else None,  # room for tags
+            showgrid=True,
+            gridwidth=0.5,
+        ),
+        legend=dict(font=dict(size=12)),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_operation_donut(df: pd.DataFrame) -> None:
+    """Donut chart — share of operations by Operation_Type."""
+    st.subheader("Operation Mix")
+
+    if df.empty or "Operation_Type" not in df.columns:
+        st.info("No operation-type data to display.")
+        return
+
+    breakdown = (
+        df["Operation_Type"]
+          .value_counts()
+          .rename_axis("Operation_Type")
+          .reset_index(name="Count")
+    )
+
+    fig = px.pie(
+        breakdown,
+        names="Operation_Type",
+        values="Count",
+        hole=0.55,
+        color="Operation_Type",
+        color_discrete_map=OPERATION_COLOURS,
+        category_orders={"Operation_Type": list(OPERATION_TYPES)},
+    )
+    fig.update_traces(
+        textinfo="percent+label",
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Operations: %{value}<br>"
+            "Share: %{percent}<extra></extra>"
+        ),
+    )
+    _apply_house_style(fig)
+    fig.update_layout(showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_operations_timeline(df: pd.DataFrame) -> None:
+    """
+    Gantt-style timeline of every operation.
+
+    X-axis : Date
+    Y-axis : Officer
+    Colour : Operation_Type
+    Size   : Distance (KM)
+
+    A single dot = a single operation, so two City Patrols on different days
+    are visibly distinct on the same officer's row.
+    """
+    st.subheader("Operations Timeline")
+
+    required = {"Officer_Name", "Operation_Type", "Date", "Location", "Distance"}
+    if df.empty or not required.issubset(df.columns):
+        st.info("Timeline requires officer, operation, date, location and distance fields.")
+        return
+
+    timeline_df = df.dropna(subset=["Date"]).copy()
+    if timeline_df.empty:
+        st.info("No dated operations to plot.")
+        return
+
+    # Officers sorted by their first activity date so the chart reads
+    # chronologically from top to bottom.
+    officer_order = (
+        timeline_df.groupby("Officer_Name")["Date"]
+                   .min()
+                   .sort_values(ascending=False)
+                   .index.tolist()
+    )
+
+    fig = px.scatter(
+        timeline_df,
+        x="Date",
+        y="Officer_Name",
+        color="Operation_Type",
+        size="Distance",
+        size_max=22,
+        labels={
+            "Date": "Operation Date",
+            "Officer_Name": "Officer",
+            "Operation_Type": "Operation",
+            "Distance": "Distance (KM)",
+            "Location": "Location",
+        },
+        color_discrete_map=OPERATION_COLOURS,
+        category_orders={
+            "Officer_Name": officer_order,
+            "Operation_Type": list(OPERATION_TYPES),
+        },
+        hover_data={
+            "Officer_Name": True,
+            "Operation_Type": True,
+            "Date": "|%d %b %Y",
+            "Location": True,
+            "Distance": ":,.0f",
+        },
+    )
+    fig.update_traces(
+        marker=dict(line=dict(width=1, color="white"), opacity=0.9),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Operation: %{customdata[1]}<br>"
+            "Date: %{x|%d %b %Y}<br>"
+            "Location: %{customdata[2]}<br>"
+            "Distance: %{customdata[3]:,.0f} KM<extra></extra>"
+        ),
+        customdata=timeline_df[
+            ["Officer_Name", "Operation_Type", "Location", "Distance"]
+        ].values,
+    )
+    _apply_house_style(fig)
+    fig.update_layout(
+        xaxis=dict(title="Date", showgrid=True, gridcolor="#EEEEEE"),
+        yaxis=dict(title=None, autorange="reversed"),
+        height=max(380, 28 * len(officer_order) + 120),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Composite layout
+# ---------------------------------------------------------------------------
+
+def render_charts(df: pd.DataFrame) -> None:
+    """Compose every chart into the main dashboard grid."""
+    if df.empty:
+        st.warning("No data matches the current filters.")
+        return
+
+    # Row 1 — daily tempo (full width).
+    render_time_series(df)
+
+    st.markdown("&nbsp;")
+
+    # Row 2 — chronological per-officer timeline (full width).
+    render_operations_timeline(df)
+
+    st.markdown("&nbsp;")
+
+    # Row 3 — cinematic stacked-bar leaderboard, full width.
+    render_distance_by_officer(df)
+
+    st.markdown("&nbsp;")
+
+    # Row 4 — operation-mix donut, centred and width-constrained so it
+    # doesn't stretch into a flat oval on wide monitors.
+    spacer_l, mid, spacer_r = st.columns((1, 2, 1))
+    with mid:
+        render_operation_donut(df)
