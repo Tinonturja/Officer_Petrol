@@ -15,4 +15,7 @@ __pycache__/
 
 # OS Generated Files (Mac/Windows junk)
 .DS_Store
-Thumbs.db
+Thumbs.dbofcptlenv/
+venv/
+__pycache__/
+*.pyc
